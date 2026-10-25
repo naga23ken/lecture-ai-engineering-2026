@@ -42,6 +42,7 @@ def ask(question: str) -> str:
     ):
         formatted_count = f"{count:,}" if count is not None else "-"
         print(f"  {label}: {formatted_count}")
+    print("\n")
 
     return response.text
 
@@ -51,7 +52,7 @@ def main() -> None:
     parser.add_argument("question", nargs="?", default=DEFAULT_QUESTION)
     args = parser.parse_args()
 
-    print(f"[model] {MODEL}")
+    print(f"[model] {MODEL}\n\n")
     print(f"[質問] {args.question}\n")
     try:
         print(ask(args.question))
