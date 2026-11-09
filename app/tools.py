@@ -5,6 +5,7 @@
 """
 
 import json
+import random
 from functools import cache
 from pathlib import Path
 
@@ -77,3 +78,53 @@ def get_lecture_summary(lecture: int) -> str:
         available = sorted(p.stem for p in (DATA_DIR / "lectures").glob("*.md"))
         return f"第{lecture}回の要点はまだありません。用意されている回: {', '.join(available)}"
     return path.read_text(encoding="utf-8")
+
+
+def make_quiz(lecture: int) -> str:
+    """指定した回の用語から確認問題を1問作り、問題と答えを返す。
+
+    講義内容の理解を確認したいときに使う。
+
+    用語の中からランダムに選択して問題と解答を返す。
+    問題は、『「用語」の意味は？』の形式とする。
+    回答はJSON形式とする。
+    """
+    terms = [term for term in load_glossary() if term["lecture"] == lecture]
+    if not terms:
+        return json.dumps(
+            {"error": f"第{lecture}回の用語が見つかりませんでした。"},
+            ensure_ascii=False,
+        )
+
+    term = random.choice(terms)
+    return json.dumps(
+        {
+            "question": f"「{term['term']}」の意味は？",
+            "answer": term["definition"],
+        },
+        ensure_ascii=False,
+    )
+
+def save_learning_log(question: str, answer: str) -> str:
+    """学習ログを保存する。
+    
+    学習の進捗を記録する。
+    保存にはユーザーの承認が必要である。
+    承認された場合のみに実行する。 (DeferredToolResponses形式)
+    """
+    log_path = "log/learning_log.json"
+    log_path = Path(log_path)
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    if not log_path.exists():
+        log_path.write_text("[]", encoding="utf-8")
+    log = json.loads(log_path.read_text(encoding="utf-8"))
+
+    time = __import__("datetime").datetime.now().isoformat()
+    log.append({"time": time, "question": question, "answer": answer})
+    log_path.write_text(json.dumps(log, ensure_ascii=False, indent=2), encoding="utf-8")
+    return json.dumps({"message": "学習ログを保存しました。"}, ensure_ascii=False)  
+
+
+
+    
+    

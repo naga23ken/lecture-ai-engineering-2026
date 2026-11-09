@@ -16,7 +16,7 @@ import inspect
 import json
 from pathlib import Path
 
-from pydantic_ai import Agent
+from pydantic_ai import Agent, DeferredToolRequests
 from pydantic_ai.exceptions import ModelHTTPError
 from fastmcp import Client
 from pydantic_ai.mcp import MCPToolset, StdioTransport
@@ -35,14 +35,24 @@ INSTRUCTIONS = """\
 - 用語集に見つからないことは、推測で断定せず「用語集にはない」と伝える。
 - 回答の最後に、関係する回（第N回）を示す。
 - 宿題の答えそのものは書かず、考え方のヒントで導く。
+- やり取りを学習ログとして必ず保存する。ただし、ユーザーが拒否したときは保管しない。
 """
 
 # モデルは実行時に渡す（テストではAPIを呼ばない TestModel に差し替えるため）
-agent = Agent(instructions=INSTRUCTIONS)
+#agent = Agent(instructions=INSTRUCTIONS)
+
+# 第3回宿題対応: 出力タイプを追加
+agent = Agent(instructions=INSTRUCTIONS,
+              output_type=[str, DeferredToolRequests])
+
 agent.tool_plain(tools.search_glossary)
 agent.tool_plain(tools.get_lecture_summary)
 
 # TODO(第3回 演習): tools.py に make_quiz を作り、ここで登録しよう
+agent.tool_plain(tools.make_quiz)  # 第3回: 確認問題を作るツールを登録
+
+# 第3回 宿題 :
+agent.tool_plain(tools.save_learning_log, requires_approval=True)  # 第3回: 学習ログを保存するツールを登録
 
 # 第5回: 使う MCP サーバーの設定ファイル。Claude Desktop や Cursor と同じ "mcpServers" 形式
 MCP_CONFIG = Path(__file__).resolve().parent / "mcp_servers.json"
@@ -132,7 +142,45 @@ def main() -> None:
     except ModelHTTPError as e:
         print(api_error_message(e.status_code, str(e.body)[:200]))
         raise SystemExit(1)
-    print(result.output)
+    # print(result.output)
+
+    # 第3回宿題
+    if isinstance(result.output, DeferredToolRequests):
+        print(f"-- 承認が必要です。承認待ち件数:{len(result.output.approvals)} 件 --")
+
+        for req in result.output.approvals:
+            print(f"\n承認対象: {req.tool_name}")
+            if req.tool_name == "save_learning_log":
+                request_args = req.args_as_dict(raise_if_invalid=True)
+                print("目的: 質問と回答を学習ログ（log/learning_log.json）に保存します。")
+                # print(f"質問: {request_args.get('question', '')}")
+                # print(f"回答: {request_args.get('answer', '')}")
+            else:
+                print(f"実行内容: {req.args_as_json_str()}")
+
+        print("\nこの内容の実行を承認しますか？ (1：はい、2：いいえ)")
+        user_input = input("入力 > ").strip()
+
+        user_response = user_input == "1"
+
+        if user_response:
+            print("-- 承認されました。--")
+        else:
+            print("-- 承認されませんでした。--")
+
+        tool_responses = result.output.build_results(
+            approvals={req.tool_call_id: user_response for req in result.output.approvals}
+        )
+        final_result = target.run_sync(
+            message_history=result.all_messages(),
+            deferred_tool_results=tool_responses,
+            model=build_model(),
+        )
+        print(final_result.output)
+    else:
+        print("-- 承認要求はありませんでした。--")
+        print(result.output)
+
     if args.trace:
         print_trace(result)
 
